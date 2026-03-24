@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.DS_Store
+output.txt
+*.log
+.env
+__pycache__/
+overall_summary.txt
+trial_*_summary.txt
+trial_*.json
+trial1-5.zip
