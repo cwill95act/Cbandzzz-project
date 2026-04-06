@@ -4,22 +4,26 @@ from retriever import MemoryRetriever
 from reflector import Reflector
 from llm import generate_response
 
+# This file defines the Agent class — the core of the simulation.
+# Each agent has a name, persona, beliefs, goals, and a memory system.
+# Agents speak, observe others, reflect on what they've heard, and track their own stance over time.
 
 class Agent:
     def __init__(self, name: str, persona: str, initial_belief: str, initial_goal: str):
         self.name = name
         self.persona = persona
         self.initial_belief = initial_belief
-        self.current_belief = initial_belief
-        self.current_goal = initial_goal
+        self.current_belief = initial_belief   # belief can change as the discussion evolves
+        self.current_goal = initial_goal       # goal can also shift based on what others say
 
-        self.memory_stream = MemoryStream()
-        self.retriever = MemoryRetriever()
-        self.reflector = Reflector()
+        self.memory_stream = MemoryStream()    # stores everything the agent has observed or thought
+        self.retriever = MemoryRetriever()     # pulls relevant memories when the agent needs to respond
+        self.reflector = Reflector()           # generates high-level reflections after each round
 
-        self.stance_history = []
-        self.round_traces = []
+        self.stance_history = []   # tracks whether the agent was supportive/skeptical/balanced each round
+        self.round_traces = []     # full log of what happened each round (used for analysis)
 
+    # Called when this agent hears another agent speak — saves it to memory
     def observe(self, speaker: str, message: str, round_id: int) -> None:
         short_message = self._extract_view(message)
         importance = self._estimate_importance(short_message)
@@ -90,6 +94,8 @@ class Agent:
                 return True
         return False
 
+    # Uses the LLM to label a message as "supportive", "skeptical", or "balanced"
+    # This is the stance classifier — added to track how each agent's position shifts over time
     def classify_stance(self, text: str) -> str:
         prompt = f"""
 You are labeling one discussion message about AI tools in education.
@@ -128,6 +134,8 @@ balanced
         selected = self.retriever.retrieve(memories, topic, current_round, top_k)
         return [m.content for m in selected]
 
+    # ReAct step: before speaking, the agent reasons about what it observed and how it was influenced.
+    # Returns a structured dict with observation, thought, influence analysis, and updated belief/goal.
     def react_step(self, topic: str, current_round: int, selected_memories: list[str],
                    previous_round_messages: dict = None) -> dict:
         if selected_memories:
@@ -262,6 +270,7 @@ Rules:
 
         return default
 
+    # After each round, the agent reflects on recent memories to form a higher-level insight
     def reflect(self, current_round: int) -> str:
         recent = self.memory_stream.get_recent(6)
         if not recent:
@@ -282,6 +291,8 @@ Rules:
 
         return reflection_text
 
+    # Main method: the agent reasons (react_step), then generates its spoken message for the round.
+    # Also classifies the stance of the message and logs everything to round_traces.
     def speak(self, topic: str, current_round: int, previous_round_messages: dict = None) -> str:
         selected_memories = self.retrieve_memories(topic, current_round, top_k=3)
         react_data = self.react_step(topic, current_round, selected_memories, previous_round_messages)

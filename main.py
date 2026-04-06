@@ -1,8 +1,13 @@
 import json
 from agent import Agent
 
+# This file runs the full multi-agent simulation.
+# It builds the 4 agents, runs them through multiple rounds of discussion,
+# and saves the results to JSON and text summary files.
+
 
 def build_agents():
+    # Creates the 4 agents with their starting personas, beliefs, and goals
     return [
         Agent(
             "Alice",
@@ -32,6 +37,7 @@ def build_agents():
 
 
 def save_trial_json(trial_id: int, topic: str, agents: list[Agent]) -> None:
+    # Saves the full simulation data for one trial as a JSON file (used by analyze.py later)
     trial_data = {
         "trial_id": trial_id,
         "topic": topic,
@@ -55,6 +61,7 @@ def save_trial_json(trial_id: int, topic: str, agents: list[Agent]) -> None:
 
 
 def save_trial_summary(trial_id: int, topic: str, agents: list[Agent]) -> None:
+    # Saves a human-readable text summary of the trial (beliefs, stances, round-by-round traces)
     with open(f"trial_{trial_id}_summary.txt", "w", encoding="utf-8") as f:
         f.write(f"TRIAL {trial_id}\n")
         f.write(f"Topic: {topic}\n\n")
@@ -82,6 +89,7 @@ def save_trial_summary(trial_id: int, topic: str, agents: list[Agent]) -> None:
 
 
 def run_one_simulation(trial_id: int, rounds: int = 5):
+    # Runs a single trial: agents take turns speaking for N rounds, then reflections are saved
     topic = "whether students should use AI tools in education"
     agents = build_agents()
 
@@ -141,6 +149,7 @@ def run_one_simulation(trial_id: int, rounds: int = 5):
 
 
 def save_overall_summary(all_agents_by_trial: list[list[Agent]], num_trials: int, rounds: int) -> None:
+    # Writes a combined summary across all trials to overall_summary.txt
     with open("overall_summary.txt", "w", encoding="utf-8") as f:
         f.write("Overall Experiment Summary\n")
         f.write("==========================\n\n")
@@ -160,6 +169,7 @@ def save_overall_summary(all_agents_by_trial: list[list[Agent]], num_trials: int
 
 
 def run_experiments(num_trials: int = 5, rounds: int = 5):
+    # Entry point: runs N trials and saves an overall summary when done
     all_agents_by_trial = []
 
     for trial_id in range(1, num_trials + 1):

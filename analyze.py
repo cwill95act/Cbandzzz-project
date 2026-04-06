@@ -4,6 +4,11 @@ import re
 import matplotlib.pyplot as plt
 from matplotlib_venn import venn2, venn3
 
+# This file analyzes the results from completed simulation trials.
+# It loads the trial JSON files, extracts key themes, and generates two visualizations:
+#   - stance_evolution.png: shows how each agent's stance changed round by round
+#   - venn_diagram.png: shows which themes appeared in which trials
+
 
 STOP_WORDS = {
     "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for",
@@ -33,6 +38,7 @@ KEY_THEMES = [
 
 
 def extract_themes(text: str) -> set:
+    # Scans a piece of text and returns which key themes appear in it
     text = text.lower()
     found = set()
     for theme in KEY_THEMES:
@@ -47,6 +53,7 @@ def load_trial(path: str) -> dict:
 
 
 def get_trial_themes(trial: dict) -> set:
+    # Collects all themes mentioned across all agents and rounds in one trial
     themes = set()
     for agent in trial["agents"]:
         for trace in agent["traces"]:
@@ -61,6 +68,7 @@ def get_trial_themes(trial: dict) -> set:
 
 
 def get_trial_stances(trial: dict) -> dict:
+    # Returns each agent's stance history (list of supportive/skeptical/balanced per round) for a trial
     return {
         agent["name"]: agent["stance_history"]
         for agent in trial["agents"]
@@ -109,6 +117,8 @@ def plot_venn(sets: list[set], labels: list[str], title: str):
 
 
 def plot_stance_evolution(all_stances: list[dict], trial_labels: list[str]):
+    # Generates a chart showing how each agent's stance shifted round by round across all trials
+    # Saves the result as stance_evolution.png
     agents = list(all_stances[0].keys())
     stance_to_num = {"supportive": 1, "balanced": 0, "skeptical": -1}
     colors = {"Alice": "#4C9BE8", "Bob": "#E85C5C", "Carol": "#6DBF6D", "David": "#F5A623"}
