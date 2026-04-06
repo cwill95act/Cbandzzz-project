@@ -6,15 +6,15 @@ def build_agents():
     return [
         Agent(
             "Alice",
-            "Alice is optimistic about educational technology.",
-            "AI tools can support learning and creativity.",
-            "Promote the benefits of AI in education while encouraging responsible use."
+            "Alice is generally optimistic about educational technology, though she is genuinely open to concerns about equity and over-reliance.",
+            "AI tools can support learning and creativity, but I'm still figuring out where the right limits are.",
+            "Promote the benefits of AI in education while staying open to criticism that might sharpen my view."
         ),
         Agent(
             "Bob",
-            "Bob is skeptical and worries about fairness and misuse.",
-            "AI tools can be harmful if students over-rely on them.",
-            "Warn the group about dependency, misuse, and loss of critical thinking."
+            "Bob is skeptical about AI in schools, but he acknowledges that some thoughtful applications could be genuinely useful.",
+            "AI tools carry real risks of dependency and misuse, though I can imagine responsible use cases.",
+            "Surface the risks and blind spots in overly optimistic views, while remaining open to evidence that changes my mind."
         ),
         Agent(
             "Carol",
@@ -81,7 +81,7 @@ def save_trial_summary(trial_id: int, topic: str, agents: list[Agent]) -> None:
             f.write("\n")
 
 
-def run_one_simulation(trial_id: int, rounds: int = 3):
+def run_one_simulation(trial_id: int, rounds: int = 5):
     topic = "whether students should use AI tools in education"
     agents = build_agents()
 
@@ -90,11 +90,15 @@ def run_one_simulation(trial_id: int, rounds: int = 3):
     print(f"Topic: {topic}")
     print("==============================\n")
 
+    previous_round_messages = {}
+
     for round_id in range(1, rounds + 1):
         print(f"===== Round {round_id} =====")
+        current_round_messages = {}
 
         for speaker in agents:
-            message = speaker.speak(topic, current_round=round_id)
+            message = speaker.speak(topic, current_round=round_id, previous_round_messages=previous_round_messages)
+            current_round_messages[speaker.name] = message
             trace = speaker.round_traces[-1]
 
             print(f"\n{speaker.name}")
@@ -114,6 +118,7 @@ def run_one_simulation(trial_id: int, rounds: int = 3):
             reflection = agent.reflect(current_round=round_id)
             print(f"{agent.name}: {reflection}")
 
+        previous_round_messages = current_round_messages
         print()
 
     print("===== Final Stance Evolution =====")
@@ -154,7 +159,7 @@ def save_overall_summary(all_agents_by_trial: list[list[Agent]], num_trials: int
             f.write("\n")
 
 
-def run_experiments(num_trials: int = 5, rounds: int = 3):
+def run_experiments(num_trials: int = 5, rounds: int = 5):
     all_agents_by_trial = []
 
     for trial_id in range(1, num_trials + 1):
@@ -165,4 +170,4 @@ def run_experiments(num_trials: int = 5, rounds: int = 3):
 
 
 if __name__ == "__main__":
-    run_experiments(num_trials=5, rounds=3)
+    run_experiments(num_trials=5, rounds=5)

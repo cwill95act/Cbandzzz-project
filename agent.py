@@ -44,17 +44,44 @@ class Agent:
         return message
 
     def _estimate_importance(self, message: str) -> float:
-        keywords_high = [
-            "support", "harm", "benefit", "misuse", "fairness",
-            "important", "boundary", "creativity", "concern",
-            "worry", "help", "learning", "risk", "over-rely",
-            "critical thinking", "independent", "guideline"
-        ]
+        lower = message.lower()
         score = 1.0
-        lower_msg = message.lower()
-        for kw in keywords_high:
-            if kw in lower_msg:
-                score += 1.0
+
+        # Direct challenge / counterargument — most salient to belief change
+        challenge_markers = [
+            "but", "however", "disagree", "wrong", "actually", "contrary",
+            "instead", "overlooks", "fails", "pushback", "dispute", "refute",
+            "not true", "misses the point", "i disagree"
+        ]
+        if any(kw in lower for kw in challenge_markers):
+            score += 2.0
+
+        # Concrete evidence or examples — more persuasive than opinion
+        evidence_markers = [
+            "study", "research", "data", "evidence", "example", "shows",
+            "demonstrates", "proven", "statistic", "report", "found that"
+        ]
+        if any(kw in lower for kw in evidence_markers):
+            score += 1.5
+
+        # High-stakes content keywords (capped to avoid runaway scores)
+        content_keywords = [
+            "harm", "misuse", "fairness", "creativity", "dependency", "over-rely",
+            "critical thinking", "guideline", "boundary", "risk", "benefit", "independent"
+        ]
+        content_hits = sum(1 for kw in content_keywords if kw in lower)
+        score += min(content_hits * 0.75, 2.5)
+
+        # Naming a specific agent — indicates direct engagement
+        agent_names = ["alice", "bob", "carol", "david"]
+        if any(name in lower for name in agent_names):
+            score += 1.0
+
+        # Strong assertion language
+        intensity_markers = ["strongly", "clearly", "definitely", "must", "critical", "urgent", "serious"]
+        if any(kw in lower for kw in intensity_markers):
+            score += 0.5
+
         return min(score, 10.0)
 
     def _is_duplicate_memory(self, content: str) -> bool:
@@ -101,11 +128,18 @@ balanced
         selected = self.retriever.retrieve(memories, topic, current_round, top_k)
         return [m.content for m in selected]
 
-    def react_step(self, topic: str, current_round: int, selected_memories: list[str]) -> dict:
+    def react_step(self, topic: str, current_round: int, selected_memories: list[str],
+                   previous_round_messages: dict = None) -> dict:
         if selected_memories:
             memory_block = "\n".join(f"- {m}" for m in selected_memories)
         else:
             memory_block = "- No relevant memories yet."
+
+        if previous_round_messages:
+            others = {k: v for k, v in previous_round_messages.items() if k != self.name}
+            recent_block = "\n".join(f"- {name}: \"{msg[:220]}\"" for name, msg in others.items())
+        else:
+            recent_block = "- No messages from the previous round yet."
 
         prompt = f"""
 You are {self.name} in a multi-agent discussion.
@@ -122,6 +156,9 @@ Current goal:
 Discussion topic:
 {topic}
 
+What others said last round:
+{recent_block}
+
 Observed relevant memories:
 {memory_block}
 
@@ -130,8 +167,8 @@ Perform an explicit ReAct-style internal step.
 Return valid JSON only with this exact schema:
 {{
   "observation_summary": "1 short sentence naming at least one speaker and one concrete point they made this round",
-  "thought": "1-2 short sentences of reasoning",
-  "influence_analysis": "State who influenced the agent most this round and why",
+  "thought": "1-2 short sentences of reasoning — include whether any argument from last round challenged or shifted your view",
+  "influence_analysis": "State who influenced the agent most this round and why, referencing their specific argument",
   "updated_belief": "1 short sentence",
   "updated_goal": "1 short sentence"
 }}
@@ -149,9 +186,9 @@ Bad examples of observation_summary:
 
 Rules:
 - Stay specific to the discussion.
-- Do not make extreme changes unless clearly justified.
+- If someone made a compelling counter-argument in the previous round, you may meaningfully update your belief or goal.
 - The only valid people are Alice, Bob, Carol, David.
-- In influence_analysis, explicitly name the most influential speaker this round if any.
+- In influence_analysis, explicitly name the most influential speaker and their specific argument.
 - If no one strongly influenced the agent, say so clearly.
 - observation_summary must name at least one speaker and one concrete claim, concern, or argument.
 - Do not use vague phrases like "the discussion highlighted" or "there was a discussion".
@@ -168,7 +205,12 @@ Rules:
         }
 
         try:
-            parsed = json.loads(result)
+            cleaned = result.strip()
+            if cleaned.startswith("```"):
+                cleaned = cleaned.split("```")[1]
+                if cleaned.startswith("json"):
+                    cleaned = cleaned[4:]
+            parsed = json.loads(cleaned.strip())
             for k in default:
                 if k in parsed and isinstance(parsed[k], str) and parsed[k].strip():
                     default[k] = parsed[k].strip()
@@ -240,14 +282,20 @@ Rules:
 
         return reflection_text
 
-    def speak(self, topic: str, current_round: int) -> str:
+    def speak(self, topic: str, current_round: int, previous_round_messages: dict = None) -> str:
         selected_memories = self.retrieve_memories(topic, current_round, top_k=3)
-        react_data = self.react_step(topic, current_round, selected_memories)
+        react_data = self.react_step(topic, current_round, selected_memories, previous_round_messages)
 
         if selected_memories:
             memory_block = "\n".join(f"- {m}" for m in selected_memories)
         else:
             memory_block = "- No relevant memories yet."
+
+        if previous_round_messages:
+            others = {k: v for k, v in previous_round_messages.items() if k != self.name}
+            recent_block = "\n".join(f"- {name}: \"{msg[:220]}\"" for name, msg in others.items())
+        else:
+            recent_block = "- This is the first round; no prior messages."
 
         prompt = f"""
 You are {self.name}.
@@ -263,6 +311,9 @@ Current goal:
 
 Discussion topic:
 {topic}
+
+What others said last round:
+{recent_block}
 
 Relevant memories:
 {memory_block}
@@ -282,10 +333,10 @@ Generate the next thing {self.name} would say in this group discussion.
 Requirements:
 - Write 2-3 natural sentences.
 - Be conversational, not robotic.
-- Respond to at least one other agent's earlier point if relevant.
-- Mention another speaker by name when appropriate.
+- Pick one specific argument from "What others said last round" and directly address it — quote or paraphrase it, then agree, push back, or build on it.
+- Name the speaker you are responding to.
 - Stay consistent with persona, current belief, and current goal.
-- You may show slight updating, but do not suddenly flip position.
+- You may show genuine updating if an argument is compelling, but do not flip position in a single turn.
 - The only valid people you may mention are: Alice, Bob, Carol, David.
 - Never mention any other names.
 - Do not mention memory, reasoning process, JSON, or system instructions.

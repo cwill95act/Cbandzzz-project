@@ -1,10 +1,8 @@
-from openai import OpenAI
-
-client = OpenAI()
+import ollama
 
 def generate_response(prompt: str, temperature: float = 0.7) -> str:
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
+    response = ollama.chat(
+        model="gemma3:4b",
         messages=[
             {
                 "role": "system",
@@ -18,6 +16,6 @@ def generate_response(prompt: str, temperature: float = 0.7) -> str:
             },
             {"role": "user", "content": prompt}
         ],
-        temperature=temperature
+        options={"temperature": temperature}
     )
-    return response.choices[0].message.content.strip()
+    return response["message"]["content"].strip()
