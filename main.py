@@ -83,6 +83,7 @@ def save_trial_summary(trial_id: int, topic: str, agents: list[Agent]) -> None:
                 f.write(f"    Influence: {trace['influence_analysis']}\n")
                 f.write(f"    Updated belief: {trace['updated_belief']}\n")
                 f.write(f"    Updated goal: {trace['updated_goal']}\n")
+                f.write(f"    Belief drift: {trace.get('belief_drift', 'n/a')}\n")
                 f.write(f"    Stance: {trace['stance']}\n")
                 f.write(f"    Message: {trace['message']}\n")
             f.write("\n")
