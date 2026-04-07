@@ -2,7 +2,7 @@ import json
 from memory import MemoryItem, MemoryStream
 from retriever import MemoryRetriever
 from reflector import Reflector
-from llm import generate_response
+from llm import generate_response, get_embedding, cosine_similarity
 
 # This file defines the Agent class — the core of the simulation.
 # Each agent has a name, persona, beliefs, goals, and a memory system.
@@ -22,6 +22,9 @@ class Agent:
 
         self.stance_history = []   # tracks whether the agent was supportive/skeptical/balanced each round
         self.round_traces = []     # full log of what happened each round (used for analysis)
+
+        # Store the embedding of the initial belief so we can measure how far it drifts each round
+        self.initial_belief_embedding = get_embedding(initial_belief)
 
     # Called when this agent hears another agent speak — saves it to memory
     def observe(self, speaker: str, message: str, round_id: int) -> None:
@@ -228,6 +231,11 @@ Rules:
         self.current_belief = default["updated_belief"]
         self.current_goal = default["updated_goal"]
 
+        # Belief drift: 0.0 = no change from initial belief, 1.0 = completely different
+        updated_emb = get_embedding(default["updated_belief"])
+        similarity = cosine_similarity(self.initial_belief_embedding, updated_emb)
+        default["belief_drift"] = round(1.0 - similarity, 4)
+
         self.memory_stream.add_memory(MemoryItem(
             content=default["observation_summary"],
             speaker=self.name,
@@ -366,6 +374,7 @@ Requirements:
             "influence_analysis": react_data["influence_analysis"],
             "updated_belief": react_data["updated_belief"],
             "updated_goal": react_data["updated_goal"],
+            "belief_drift": react_data.get("belief_drift", 0.0),
             "message": message,
             "stance": stance
         })

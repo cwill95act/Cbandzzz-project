@@ -1,5 +1,6 @@
 import math
 from memory import MemoryItem
+from llm import get_embedding, cosine_similarity
 
 
 class MemoryRetriever:
@@ -7,6 +8,8 @@ class MemoryRetriever:
         self.recency_weight = recency_weight
         self.importance_weight = importance_weight
         self.relevance_weight = relevance_weight
+        # Cache the topic embedding so we don't recompute it on every single memory score
+        self._topic_embedding_cache: dict[str, list[float]] = {}
 
     def _recency_score(self, memory: MemoryItem, current_round: int) -> float:
         distance = max(current_round - memory.round_id, 0)
@@ -16,20 +19,27 @@ class MemoryRetriever:
         return memory.importance / 10.0
 
     def _relevance_score(self, memory: MemoryItem, topic: str) -> float:
-        memory_words = set(memory.content.lower().split())
-        topic_words = set(topic.lower().split())
+        # Use semantic embeddings instead of word overlap so meaning matters, not just shared words.
+        # Embeddings are cached on the memory object to avoid redundant calls to Ollama.
+        if memory.embedding is None:
+            memory.embedding = get_embedding(memory.content)
 
-        extra_keywords = {
-            "ai", "education", "students", "learning", "fairness",
-            "creativity", "misuse", "boundary", "support", "harm"
-        }
-        topic_words = topic_words | extra_keywords
+        if topic not in self._topic_embedding_cache:
+            self._topic_embedding_cache[topic] = get_embedding(topic)
 
-        if not topic_words:
-            return 0.0
+        topic_emb = self._topic_embedding_cache[topic]
+        similarity = cosine_similarity(memory.embedding, topic_emb)
 
-        overlap = len(memory_words & topic_words)
-        return overlap / len(topic_words)
+        # If embeddings failed (model not available), fall back to keyword overlap
+        if similarity == 0.0 and not memory.embedding:
+            memory_words = set(memory.content.lower().split())
+            topic_words = set(topic.lower().split()) | {
+                "ai", "education", "students", "learning", "fairness",
+                "creativity", "misuse", "boundary", "support", "harm"
+            }
+            return len(memory_words & topic_words) / max(len(topic_words), 1)
+
+        return similarity
 
     def score_memory(self, memory: MemoryItem, topic: str, current_round: int) -> float:
         recency = self._recency_score(memory, current_round)
