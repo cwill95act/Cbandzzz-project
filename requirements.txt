@@ -1,0 +1,6 @@
+openai
+numpy
+matplotlib
+networkx
+matplotlib-venn
+python-pptx
