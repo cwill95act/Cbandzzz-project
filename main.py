@@ -1,20 +1,26 @@
 import json
 from agent import Agent
+from llm import generate_consensus_summary
+
+# This file runs the full multi-agent simulation.
+# It builds the 4 agents, runs them through multiple rounds of discussion,
+# and saves the results to JSON and text summary files.
 
 
 def build_agents():
+    # Creates the 4 agents with their starting personas, beliefs, and goals
     return [
         Agent(
             "Alice",
-            "Alice is optimistic about educational technology.",
-            "AI tools can support learning and creativity.",
-            "Promote the benefits of AI in education while encouraging responsible use."
+            "Alice is generally optimistic about educational technology, though she is genuinely open to concerns about equity and over-reliance.",
+            "AI tools can support learning and creativity, but I'm still figuring out where the right limits are.",
+            "Promote the benefits of AI in education while staying open to criticism that might sharpen my view."
         ),
         Agent(
             "Bob",
-            "Bob is skeptical and worries about fairness and misuse.",
-            "AI tools can be harmful if students over-rely on them.",
-            "Warn the group about dependency, misuse, and loss of critical thinking."
+            "Bob is skeptical about AI in schools, but he acknowledges that some thoughtful applications could be genuinely useful.",
+            "AI tools carry real risks of dependency and misuse, though I can imagine responsible use cases.",
+            "Surface the risks and blind spots in overly optimistic views, while remaining open to evidence that changes my mind."
         ),
         Agent(
             "Carol",
@@ -32,6 +38,7 @@ def build_agents():
 
 
 def save_trial_json(trial_id: int, topic: str, agents: list[Agent]) -> None:
+    # Saves the full simulation data for one trial as a JSON file (used by analyze.py later)
     trial_data = {
         "trial_id": trial_id,
         "topic": topic,
@@ -55,6 +62,7 @@ def save_trial_json(trial_id: int, topic: str, agents: list[Agent]) -> None:
 
 
 def save_trial_summary(trial_id: int, topic: str, agents: list[Agent]) -> None:
+    # Saves a human-readable text summary of the trial (beliefs, stances, round-by-round traces)
     with open(f"trial_{trial_id}_summary.txt", "w", encoding="utf-8") as f:
         f.write(f"TRIAL {trial_id}\n")
         f.write(f"Topic: {topic}\n\n")
@@ -76,12 +84,14 @@ def save_trial_summary(trial_id: int, topic: str, agents: list[Agent]) -> None:
                 f.write(f"    Influence: {trace['influence_analysis']}\n")
                 f.write(f"    Updated belief: {trace['updated_belief']}\n")
                 f.write(f"    Updated goal: {trace['updated_goal']}\n")
+                f.write(f"    Belief drift: {trace.get('belief_drift', 'n/a')}\n")
                 f.write(f"    Stance: {trace['stance']}\n")
                 f.write(f"    Message: {trace['message']}\n")
             f.write("\n")
 
 
-def run_one_simulation(trial_id: int, rounds: int = 3):
+def run_one_simulation(trial_id: int, rounds: int = 5):
+    # Runs a single trial: agents take turns speaking for N rounds, then reflections are saved
     topic = "whether students should use AI tools in education"
     agents = build_agents()
 
@@ -90,11 +100,15 @@ def run_one_simulation(trial_id: int, rounds: int = 3):
     print(f"Topic: {topic}")
     print("==============================\n")
 
+    previous_round_messages = {}
+
     for round_id in range(1, rounds + 1):
         print(f"===== Round {round_id} =====")
+        current_round_messages = {}
 
         for speaker in agents:
-            message = speaker.speak(topic, current_round=round_id)
+            message = speaker.speak(topic, current_round=round_id, previous_round_messages=previous_round_messages)
+            current_round_messages[speaker.name] = message
             trace = speaker.round_traces[-1]
 
             print(f"\n{speaker.name}")
@@ -114,6 +128,7 @@ def run_one_simulation(trial_id: int, rounds: int = 3):
             reflection = agent.reflect(current_round=round_id)
             print(f"{agent.name}: {reflection}")
 
+        previous_round_messages = current_round_messages
         print()
 
     print("===== Final Stance Evolution =====")
@@ -136,6 +151,7 @@ def run_one_simulation(trial_id: int, rounds: int = 3):
 
 
 def save_overall_summary(all_agents_by_trial: list[list[Agent]], num_trials: int, rounds: int) -> None:
+    # Writes a combined summary across all trials to overall_summary.txt
     with open("overall_summary.txt", "w", encoding="utf-8") as f:
         f.write("Overall Experiment Summary\n")
         f.write("==========================\n\n")
@@ -154,7 +170,23 @@ def save_overall_summary(all_agents_by_trial: list[list[Agent]], num_trials: int
             f.write("\n")
 
 
-def run_experiments(num_trials: int = 5, rounds: int = 3):
+def build_agent_summaries(all_agents_by_trial: list[list[Agent]]) -> dict:
+    summaries = {}
+    for agents in all_agents_by_trial:
+        for agent in agents:
+            if agent.name not in summaries:
+                summaries[agent.name] = {
+                    "initial_belief": agent.initial_belief,
+                    "final_beliefs": [],
+                    "stance_histories": [],
+                }
+            summaries[agent.name]["final_beliefs"].append(agent.current_belief)
+            summaries[agent.name]["stance_histories"].append(agent.stance_history)
+    return summaries
+
+
+def run_experiments(num_trials: int = 5, rounds: int = 5):
+    # Entry point: runs N trials, saves overall summary, then generates an LLM consensus
     all_agents_by_trial = []
 
     for trial_id in range(1, num_trials + 1):
@@ -163,6 +195,20 @@ def run_experiments(num_trials: int = 5, rounds: int = 3):
 
     save_overall_summary(all_agents_by_trial, num_trials, rounds)
 
+    topic = "whether students should use AI tools in education"
+    agent_summaries = build_agent_summaries(all_agents_by_trial)
+    consensus = generate_consensus_summary(topic, agent_summaries)
+
+    print("\n========== CONSENSUS SUMMARY ==========")
+    print(consensus)
+    print("=======================================\n")
+
+    with open("consensus_summary.txt", "w", encoding="utf-8") as f:
+        f.write("Consensus Summary\n")
+        f.write("=================\n\n")
+        f.write(consensus)
+        f.write("\n")
+
 
 if __name__ == "__main__":
-    run_experiments(num_trials=5, rounds=3)
+    run_experiments(num_trials=5, rounds=5)

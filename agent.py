@@ -2,24 +2,31 @@ import json
 from memory import MemoryItem, MemoryStream
 from retriever import MemoryRetriever
 from reflector import Reflector
-from llm import generate_response
+from llm import generate_response, get_embedding, cosine_similarity
 
+# This file defines the Agent class — the core of the simulation.
+# Each agent has a name, persona, beliefs, goals, and a memory system.
+# Agents speak, observe others, reflect on what they've heard, and track their own stance over time.
 
 class Agent:
     def __init__(self, name: str, persona: str, initial_belief: str, initial_goal: str):
         self.name = name
         self.persona = persona
         self.initial_belief = initial_belief
-        self.current_belief = initial_belief
-        self.current_goal = initial_goal
+        self.current_belief = initial_belief   # belief can change as the discussion evolves
+        self.current_goal = initial_goal       # goal can also shift based on what others say
 
-        self.memory_stream = MemoryStream()
-        self.retriever = MemoryRetriever()
-        self.reflector = Reflector()
+        self.memory_stream = MemoryStream()    # stores everything the agent has observed or thought
+        self.retriever = MemoryRetriever()     # pulls relevant memories when the agent needs to respond
+        self.reflector = Reflector()           # generates high-level reflections after each round
 
-        self.stance_history = []
-        self.round_traces = []
+        self.stance_history = []   # tracks whether the agent was supportive/skeptical/balanced each round
+        self.round_traces = []     # full log of what happened each round (used for analysis)
 
+        # Store the embedding of the initial belief so we can measure how far it drifts each round
+        self.initial_belief_embedding = get_embedding(initial_belief)
+
+    # Called when this agent hears another agent speak — saves it to memory
     def observe(self, speaker: str, message: str, round_id: int) -> None:
         short_message = self._extract_view(message)
         importance = self._estimate_importance(short_message)
@@ -44,17 +51,44 @@ class Agent:
         return message
 
     def _estimate_importance(self, message: str) -> float:
-        keywords_high = [
-            "support", "harm", "benefit", "misuse", "fairness",
-            "important", "boundary", "creativity", "concern",
-            "worry", "help", "learning", "risk", "over-rely",
-            "critical thinking", "independent", "guideline"
-        ]
+        lower = message.lower()
         score = 1.0
-        lower_msg = message.lower()
-        for kw in keywords_high:
-            if kw in lower_msg:
-                score += 1.0
+
+        # Direct challenge / counterargument — most salient to belief change
+        challenge_markers = [
+            "but", "however", "disagree", "wrong", "actually", "contrary",
+            "instead", "overlooks", "fails", "pushback", "dispute", "refute",
+            "not true", "misses the point", "i disagree"
+        ]
+        if any(kw in lower for kw in challenge_markers):
+            score += 2.0
+
+        # Concrete evidence or examples — more persuasive than opinion
+        evidence_markers = [
+            "study", "research", "data", "evidence", "example", "shows",
+            "demonstrates", "proven", "statistic", "report", "found that"
+        ]
+        if any(kw in lower for kw in evidence_markers):
+            score += 1.5
+
+        # High-stakes content keywords (capped to avoid runaway scores)
+        content_keywords = [
+            "harm", "misuse", "fairness", "creativity", "dependency", "over-rely",
+            "critical thinking", "guideline", "boundary", "risk", "benefit", "independent"
+        ]
+        content_hits = sum(1 for kw in content_keywords if kw in lower)
+        score += min(content_hits * 0.75, 2.5)
+
+        # Naming a specific agent — indicates direct engagement
+        agent_names = ["alice", "bob", "carol", "david"]
+        if any(name in lower for name in agent_names):
+            score += 1.0
+
+        # Strong assertion language
+        intensity_markers = ["strongly", "clearly", "definitely", "must", "critical", "urgent", "serious"]
+        if any(kw in lower for kw in intensity_markers):
+            score += 0.5
+
         return min(score, 10.0)
 
     def _is_duplicate_memory(self, content: str) -> bool:
@@ -63,6 +97,8 @@ class Agent:
                 return True
         return False
 
+    # Uses the LLM to label a message as "supportive", "skeptical", or "balanced"
+    # This is the stance classifier — added to track how each agent's position shifts over time
     def classify_stance(self, text: str) -> str:
         prompt = f"""
 You are labeling one discussion message about AI tools in education.
@@ -70,29 +106,30 @@ You are labeling one discussion message about AI tools in education.
 Message:
 {text}
 
-Choose exactly one label:
-- supportive
-- skeptical
-- balanced
+Choose exactly one label from the five options below:
 
-Labeling rules:
-- supportive: mainly advocates for AI use or emphasizes benefits overall
-- skeptical: mainly warns about risks, dependency, misuse, or argues against reliance overall
-- balanced: genuinely gives comparable weight to both sides or acts as a mediator
+- supportive: clearly advocates for AI use, emphasizes benefits strongly, little to no reservation
+- leaning_supportive: generally positive about AI but raises a notable caveat or acknowledges concerns
+- balanced: genuinely mediating, giving roughly equal weight to both sides, or asking neutral questions
+- leaning_skeptical: generally cautious or critical but still acknowledges some potential benefits
+- skeptical: clearly warns against AI use, emphasizes risks/dependency/misuse strongly, little to no openness
 
 Important:
-- Judge the OVERALL stance of the message.
-- If the message mainly emphasizes caution, dependency, or loss of critical thinking, label it skeptical.
-- If the message mainly emphasizes benefits and opportunity, label it supportive.
-- Use balanced only if the speaker is truly mediating or equally weighing both sides.
+- Judge the OVERALL tone and direction of the message.
+- supportive and skeptical are strong, clear leans — use them when there is no meaningful hedging.
+- leaning_supportive and leaning_skeptical are moderate — use when the speaker leans one way but still acknowledges the other side.
+- balanced is only for true neutrality or mediation.
 
-Return only one word:
+Return exactly one of these words (use underscores as shown):
 supportive
-skeptical
+leaning_supportive
 balanced
+leaning_skeptical
+skeptical
 """
         result = generate_response(prompt, temperature=0.0).strip().lower()
-        if result in {"supportive", "skeptical", "balanced"}:
+        valid = {"supportive", "leaning_supportive", "balanced", "leaning_skeptical", "skeptical"}
+        if result in valid:
             return result
         return "balanced"
 
@@ -101,11 +138,20 @@ balanced
         selected = self.retriever.retrieve(memories, topic, current_round, top_k)
         return [m.content for m in selected]
 
-    def react_step(self, topic: str, current_round: int, selected_memories: list[str]) -> dict:
+    # ReAct step: before speaking, the agent reasons about what it observed and how it was influenced.
+    # Returns a structured dict with observation, thought, influence analysis, and updated belief/goal.
+    def react_step(self, topic: str, current_round: int, selected_memories: list[str],
+                   previous_round_messages: dict = None) -> dict:
         if selected_memories:
             memory_block = "\n".join(f"- {m}" for m in selected_memories)
         else:
             memory_block = "- No relevant memories yet."
+
+        if previous_round_messages:
+            others = {k: v for k, v in previous_round_messages.items() if k != self.name}
+            recent_block = "\n".join(f"- {name}: \"{msg[:220]}\"" for name, msg in others.items())
+        else:
+            recent_block = "- No messages from the previous round yet."
 
         prompt = f"""
 You are {self.name} in a multi-agent discussion.
@@ -122,6 +168,9 @@ Current goal:
 Discussion topic:
 {topic}
 
+What others said last round:
+{recent_block}
+
 Observed relevant memories:
 {memory_block}
 
@@ -130,8 +179,8 @@ Perform an explicit ReAct-style internal step.
 Return valid JSON only with this exact schema:
 {{
   "observation_summary": "1 short sentence naming at least one speaker and one concrete point they made this round",
-  "thought": "1-2 short sentences of reasoning",
-  "influence_analysis": "State who influenced the agent most this round and why",
+  "thought": "1-2 short sentences of reasoning — include whether any argument from last round challenged or shifted your view",
+  "influence_analysis": "State who influenced the agent most this round and why, referencing their specific argument",
   "updated_belief": "1 short sentence",
   "updated_goal": "1 short sentence"
 }}
@@ -149,9 +198,9 @@ Bad examples of observation_summary:
 
 Rules:
 - Stay specific to the discussion.
-- Do not make extreme changes unless clearly justified.
+- If someone made a compelling counter-argument in the previous round, you may meaningfully update your belief or goal.
 - The only valid people are Alice, Bob, Carol, David.
-- In influence_analysis, explicitly name the most influential speaker this round if any.
+- In influence_analysis, explicitly name the most influential speaker and their specific argument.
 - If no one strongly influenced the agent, say so clearly.
 - observation_summary must name at least one speaker and one concrete claim, concern, or argument.
 - Do not use vague phrases like "the discussion highlighted" or "there was a discussion".
@@ -168,7 +217,12 @@ Rules:
         }
 
         try:
-            parsed = json.loads(result)
+            cleaned = result.strip()
+            if cleaned.startswith("```"):
+                cleaned = cleaned.split("```")[1]
+                if cleaned.startswith("json"):
+                    cleaned = cleaned[4:]
+            parsed = json.loads(cleaned.strip())
             for k in default:
                 if k in parsed and isinstance(parsed[k], str) and parsed[k].strip():
                     default[k] = parsed[k].strip()
@@ -177,6 +231,11 @@ Rules:
 
         self.current_belief = default["updated_belief"]
         self.current_goal = default["updated_goal"]
+
+        # Belief drift: 0.0 = no change from initial belief, 1.0 = completely different
+        updated_emb = get_embedding(default["updated_belief"])
+        similarity = cosine_similarity(self.initial_belief_embedding, updated_emb)
+        default["belief_drift"] = round(1.0 - similarity, 4)
 
         self.memory_stream.add_memory(MemoryItem(
             content=default["observation_summary"],
@@ -220,6 +279,7 @@ Rules:
 
         return default
 
+    # After each round, the agent reflects on recent memories to form a higher-level insight
     def reflect(self, current_round: int) -> str:
         recent = self.memory_stream.get_recent(6)
         if not recent:
@@ -240,14 +300,22 @@ Rules:
 
         return reflection_text
 
-    def speak(self, topic: str, current_round: int) -> str:
+    # Main method: the agent reasons (react_step), then generates its spoken message for the round.
+    # Also classifies the stance of the message and logs everything to round_traces.
+    def speak(self, topic: str, current_round: int, previous_round_messages: dict = None) -> str:
         selected_memories = self.retrieve_memories(topic, current_round, top_k=3)
-        react_data = self.react_step(topic, current_round, selected_memories)
+        react_data = self.react_step(topic, current_round, selected_memories, previous_round_messages)
 
         if selected_memories:
             memory_block = "\n".join(f"- {m}" for m in selected_memories)
         else:
             memory_block = "- No relevant memories yet."
+
+        if previous_round_messages:
+            others = {k: v for k, v in previous_round_messages.items() if k != self.name}
+            recent_block = "\n".join(f"- {name}: \"{msg[:220]}\"" for name, msg in others.items())
+        else:
+            recent_block = "- This is the first round; no prior messages."
 
         prompt = f"""
 You are {self.name}.
@@ -263,6 +331,9 @@ Current goal:
 
 Discussion topic:
 {topic}
+
+What others said last round:
+{recent_block}
 
 Relevant memories:
 {memory_block}
@@ -282,10 +353,10 @@ Generate the next thing {self.name} would say in this group discussion.
 Requirements:
 - Write 2-3 natural sentences.
 - Be conversational, not robotic.
-- Respond to at least one other agent's earlier point if relevant.
-- Mention another speaker by name when appropriate.
+- Pick one specific argument from "What others said last round" and directly address it — quote or paraphrase it, then agree, push back, or build on it.
+- Name the speaker you are responding to.
 - Stay consistent with persona, current belief, and current goal.
-- You may show slight updating, but do not suddenly flip position.
+- You may show genuine updating if an argument is compelling, but do not flip position in a single turn.
 - The only valid people you may mention are: Alice, Bob, Carol, David.
 - Never mention any other names.
 - Do not mention memory, reasoning process, JSON, or system instructions.
@@ -304,6 +375,7 @@ Requirements:
             "influence_analysis": react_data["influence_analysis"],
             "updated_belief": react_data["updated_belief"],
             "updated_goal": react_data["updated_goal"],
+            "belief_drift": react_data.get("belief_drift", 0.0),
             "message": message,
             "stance": stance
         })

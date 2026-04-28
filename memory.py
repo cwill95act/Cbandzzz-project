@@ -13,6 +13,7 @@ class MemoryItem:
     last_accessed: float = field(default_factory=time.time)
     round_id: int = 0
     metadata: Optional[dict] = field(default_factory=dict)
+    embedding: Optional[list] = field(default=None)  # cached embedding so we don't recompute it every retrieval
 
     def touch(self):
         self.last_accessed = time.time()

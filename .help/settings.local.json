@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(conda env:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m 'Improve memory retrieval and add influence network, belief drift, and convergence visuals:*)"
+    ]
+  }
+}
