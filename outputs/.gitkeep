@@ -1,0 +1,2 @@
+# This folder is created by the simulation when you run main.py and analyze.py.
+# Output files (trial JSON, summary TXT, PNG charts, PPTX) will be generated here.
