@@ -1,5 +1,6 @@
 import json
 from agent import Agent
+from llm import generate_consensus_summary
 
 # This file runs the full multi-agent simulation.
 # It builds the 4 agents, runs them through multiple rounds of discussion,
@@ -169,8 +170,23 @@ def save_overall_summary(all_agents_by_trial: list[list[Agent]], num_trials: int
             f.write("\n")
 
 
+def build_agent_summaries(all_agents_by_trial: list[list[Agent]]) -> dict:
+    summaries = {}
+    for agents in all_agents_by_trial:
+        for agent in agents:
+            if agent.name not in summaries:
+                summaries[agent.name] = {
+                    "initial_belief": agent.initial_belief,
+                    "final_beliefs": [],
+                    "stance_histories": [],
+                }
+            summaries[agent.name]["final_beliefs"].append(agent.current_belief)
+            summaries[agent.name]["stance_histories"].append(agent.stance_history)
+    return summaries
+
+
 def run_experiments(num_trials: int = 5, rounds: int = 5):
-    # Entry point: runs N trials and saves an overall summary when done
+    # Entry point: runs N trials, saves overall summary, then generates an LLM consensus
     all_agents_by_trial = []
 
     for trial_id in range(1, num_trials + 1):
@@ -178,6 +194,20 @@ def run_experiments(num_trials: int = 5, rounds: int = 5):
         all_agents_by_trial.append(agents)
 
     save_overall_summary(all_agents_by_trial, num_trials, rounds)
+
+    topic = "whether students should use AI tools in education"
+    agent_summaries = build_agent_summaries(all_agents_by_trial)
+    consensus = generate_consensus_summary(topic, agent_summaries)
+
+    print("\n========== CONSENSUS SUMMARY ==========")
+    print(consensus)
+    print("=======================================\n")
+
+    with open("consensus_summary.txt", "w", encoding="utf-8") as f:
+        f.write("Consensus Summary\n")
+        f.write("=================\n\n")
+        f.write(consensus)
+        f.write("\n")
 
 
 if __name__ == "__main__":

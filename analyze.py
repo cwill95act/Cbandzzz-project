@@ -141,8 +141,8 @@ def plot_stance_evolution(all_stances: list[dict], trial_labels: list[str]):
                     color=plt.cm.tab10(i / len(trial_labels)))
 
         ax.set_title(agent, color=colors.get(agent, "black"), fontweight="bold")
-        ax.set_yticks([-1, 0, 1])
-        ax.set_yticklabels(["skeptical", "balanced", "supportive"])
+        ax.set_yticks(STANCE_TICKS)
+        ax.set_yticklabels(STANCE_LABELS, fontsize=7)
         ax.set_xlabel("Round")
         ax.set_xticks(range(1, 4))
         ax.grid(True, alpha=0.3)
@@ -156,7 +156,15 @@ def plot_stance_evolution(all_stances: list[dict], trial_labels: list[str]):
 
 AGENT_NAMES = ["Alice", "Bob", "Carol", "David"]
 AGENT_COLORS = {"Alice": "#4C9BE8", "Bob": "#E85C5C", "Carol": "#6DBF6D", "David": "#F5A623"}
-STANCE_TO_NUM = {"supportive": 1, "balanced": 0, "skeptical": -1}
+STANCE_TO_NUM = {
+    "supportive": 1.0,
+    "leaning_supportive": 0.5,
+    "balanced": 0.0,
+    "leaning_skeptical": -0.5,
+    "skeptical": -1.0,
+}
+STANCE_LABELS = ["skeptical", "lean\nskeptical", "balanced", "lean\nsupportive", "supportive"]
+STANCE_TICKS  = [-1.0, -0.5, 0.0, 0.5, 1.0]
 
 
 def parse_influencer(text: str) -> str | None:
@@ -302,6 +310,73 @@ def plot_convergence_curve(all_stances: list[dict], trial_labels: list[str]):
     plt.close()
 
 
+def plot_conversation_heatmap(trials: list[dict]):
+    # Renders a stance heatmap (agents × rounds) for every trial side by side.
+    # Cell color = stance on the supportive–skeptical spectrum.
+    # Cell annotation = belief drift (0 = no change from initial belief).
+    stance_to_idx = {
+        "skeptical": 0, "leaning_skeptical": 1, "balanced": 2,
+        "leaning_supportive": 3, "supportive": 4,
+    }
+    cmap = plt.cm.RdYlBu  # red = skeptical, blue = supportive
+
+    n_trials = len(trials)
+    fig, axes = plt.subplots(1, n_trials, figsize=(3.2 * n_trials, 4.2), squeeze=False)
+
+    im = None
+    for col, trial in enumerate(trials):
+        ax = axes[0][col]
+        agents = [a["name"] for a in trial["agents"]]
+        max_rounds = max(len(a["traces"]) for a in trial["agents"])
+
+        stance_matrix = np.full((len(agents), max_rounds), 2.0)   # default = balanced
+        drift_matrix  = np.full((len(agents), max_rounds), np.nan)
+
+        for row, agent in enumerate(trial["agents"]):
+            for trace in agent["traces"]:
+                r = trace["round"] - 1
+                stance_matrix[row, r] = stance_to_idx.get(trace.get("stance", "balanced"), 2)
+                drift = trace.get("belief_drift")
+                if drift is not None:
+                    drift_matrix[row, r] = drift
+
+        im = ax.imshow(stance_matrix, cmap=cmap, vmin=0, vmax=4, aspect="auto")
+
+        for i in range(len(agents)):
+            for j in range(max_rounds):
+                drift = drift_matrix[i, j]
+                label = f"{drift:.2f}" if not np.isnan(drift) else ""
+                brightness = stance_matrix[i, j] / 4.0
+                txt_color = "white" if brightness < 0.3 or brightness > 0.75 else "black"
+                ax.text(j, i, label, ha="center", va="center", fontsize=8, color=txt_color)
+
+        ax.set_xticks(range(max_rounds))
+        ax.set_xticklabels([f"R{r + 1}" for r in range(max_rounds)], fontsize=9)
+        ax.set_yticks(range(len(agents)))
+        ax.set_yticklabels(
+            [a for a in agents],
+            fontsize=9,
+            color="black"
+        )
+        for tick, agent_name in zip(ax.get_yticklabels(), agents):
+            tick.set_color(AGENT_COLORS.get(agent_name, "black"))
+            tick.set_fontweight("bold")
+        ax.set_title(f"Trial {trial['trial_id']}", fontsize=10, fontweight="bold")
+
+    # Shared colorbar
+    cbar = fig.colorbar(im, ax=axes[0, -1], ticks=[0, 1, 2, 3, 4], fraction=0.046, pad=0.08)
+    cbar.ax.set_yticklabels(["skeptical", "lean skeptical", "balanced", "lean supportive", "supportive"], fontsize=7)
+
+    fig.suptitle(
+        "Conversation Heatmap — Stance per Agent per Round\n(cells annotated with belief drift score)",
+        fontsize=12, fontweight="bold"
+    )
+    plt.tight_layout()
+    plt.savefig("conversation_heatmap.png", dpi=150)
+    print("Saved: conversation_heatmap.png")
+    plt.close()
+
+
 def main():
     paths = sorted(glob.glob("trial_*.json"))
     if not paths:
@@ -321,6 +396,7 @@ def main():
     plot_influence_network(trials)
     plot_belief_drift(trials)
     plot_convergence_curve(all_stances, labels)
+    plot_conversation_heatmap(trials)
 
 
 if __name__ == "__main__":

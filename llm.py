@@ -40,6 +40,40 @@ def get_embedding(text: str) -> list[float]:
         return []
 
 
+def generate_consensus_summary(topic: str, agent_summaries: dict) -> str:
+    # Synthesizes what happened across all trials into a presentation-ready paragraph.
+    # agent_summaries: {name: {initial_belief, final_beliefs: [], stance_histories: []}}
+    block = ""
+    for name, data in agent_summaries.items():
+        trajectories = "; ".join(
+            " → ".join(h) for h in data["stance_histories"]
+        )
+        finals = " | ".join(data["final_beliefs"])
+        block += (
+            f"\n{name}:\n"
+            f"  Initial belief: {data['initial_belief']}\n"
+            f"  Final beliefs across trials: {finals}\n"
+            f"  Stance trajectories: {trajectories}\n"
+        )
+
+    num_trials = len(next(iter(agent_summaries.values()))["final_beliefs"])
+    prompt = f"""
+You are summarizing a multi-agent debate on the topic: "{topic}"
+
+The debate ran for {num_trials} independent trials. Here is how each agent evolved:
+{block}
+
+Write a 4-5 sentence consensus summary that:
+1. Identifies the main point(s) of agreement that emerged across trials
+2. Identifies the main point(s) of persistent disagreement
+3. Notes which agent(s) shifted the most and in what direction
+4. Ends with a one-sentence synthesis of the overall group conclusion
+
+Be specific and insightful. Do not use bullet points or headers.
+"""
+    return generate_response(prompt, temperature=0.4)
+
+
 def cosine_similarity(a: list[float], b: list[float]) -> float:
     # Measures how similar two embedding vectors are. Returns 1.0 = identical, 0.0 = unrelated.
     if not a or not b:

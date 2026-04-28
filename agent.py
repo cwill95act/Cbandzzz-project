@@ -106,29 +106,30 @@ You are labeling one discussion message about AI tools in education.
 Message:
 {text}
 
-Choose exactly one label:
-- supportive
-- skeptical
-- balanced
+Choose exactly one label from the five options below:
 
-Labeling rules:
-- supportive: mainly advocates for AI use or emphasizes benefits overall
-- skeptical: mainly warns about risks, dependency, misuse, or argues against reliance overall
-- balanced: genuinely gives comparable weight to both sides or acts as a mediator
+- supportive: clearly advocates for AI use, emphasizes benefits strongly, little to no reservation
+- leaning_supportive: generally positive about AI but raises a notable caveat or acknowledges concerns
+- balanced: genuinely mediating, giving roughly equal weight to both sides, or asking neutral questions
+- leaning_skeptical: generally cautious or critical but still acknowledges some potential benefits
+- skeptical: clearly warns against AI use, emphasizes risks/dependency/misuse strongly, little to no openness
 
 Important:
-- Judge the OVERALL stance of the message.
-- If the message mainly emphasizes caution, dependency, or loss of critical thinking, label it skeptical.
-- If the message mainly emphasizes benefits and opportunity, label it supportive.
-- Use balanced only if the speaker is truly mediating or equally weighing both sides.
+- Judge the OVERALL tone and direction of the message.
+- supportive and skeptical are strong, clear leans — use them when there is no meaningful hedging.
+- leaning_supportive and leaning_skeptical are moderate — use when the speaker leans one way but still acknowledges the other side.
+- balanced is only for true neutrality or mediation.
 
-Return only one word:
+Return exactly one of these words (use underscores as shown):
 supportive
-skeptical
+leaning_supportive
 balanced
+leaning_skeptical
+skeptical
 """
         result = generate_response(prompt, temperature=0.0).strip().lower()
-        if result in {"supportive", "skeptical", "balanced"}:
+        valid = {"supportive", "leaning_supportive", "balanced", "leaning_skeptical", "skeptical"}
+        if result in valid:
             return result
         return "balanced"
 
